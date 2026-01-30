@@ -6,14 +6,13 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import joblib
 import datetime as dt
-import time
 
-# Use light theme for better visibility (can switch to 'plotly_dark' later if you prefer dark mode)
-pio.templates.default = "plotly_white"
+# Dark theme + better visibility
+pio.templates.default = "plotly_dark"
 
 # ────────────────────────────────────────────────
 # Cache data fetch
-@st.cache_data(ttl=1800)  # 30 minutes
+@st.cache_data(ttl=1800)
 def fetch_stock_data(ticker, period="5y"):
     try:
         df = yf.download(ticker, period=period, progress=False)
@@ -24,13 +23,13 @@ def fetch_stock_data(ticker, period="5y"):
         st.error(f"Data fetch error: {e}")
         return pd.DataFrame()
 
-# Load XGBoost model
+# Load model
 @st.cache_resource
 def load_model():
     try:
         return joblib.load('xgboost_stock_model.pkl')
     except Exception as e:
-        st.error(f"Model load failed: {e}. Make sure 'xgboost_stock_model.pkl' is in repo root.")
+        st.error(f"Model load failed: {e}. Upload xgboost_stock_model.pkl")
         return None
 
 model = load_model()
@@ -38,128 +37,123 @@ if model is None:
     st.stop()
 
 # ────────────────────────────────────────────────
-# UI Setup
 st.set_page_config(page_title="NSE Smart Predictor", layout="wide", page_icon="📈")
 
-# Custom CSS for nicer look
+# Minimal custom style – dark friendly
 st.markdown("""
     <style>
-    .stApp { background-color: #f8f9fa; }
-    .metric-card { 
-        background: white; 
-        border-radius: 12px; 
-        padding: 20px; 
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        text-align: center;
+    .big-signal { 
+        font-size: 3.2rem; 
+        font-weight: bold; 
+        text-align: center; 
+        margin: 20px 0;
     }
-    .signal-strong-buy { color: #28a745; font-weight: bold; font-size: 1.8rem; }
-    .signal-buy { color: #17a2b8; font-weight: bold; font-size: 1.6rem; }
-    .signal-hold { color: #6c757d; font-weight: bold; font-size: 1.6rem; }
-    .signal-sell { color: #ffc107; font-weight: bold; font-size: 1.6rem; }
-    .signal-strong-sell { color: #dc3545; font-weight: bold; font-size: 1.8rem; }
+    .strong-buy  { color: #00ff9d; }
+    .buy         { color: #40c4ff; }
+    .hold        { color: #b0bec5; }
+    .sell        { color: #ffca28; }
+    .strong-sell { color: #ff5252; }
+    .confidence  { font-size: 1.6rem; color: #aaa; }
+    .price-metric { font-size: 1.5rem; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📈 NSE Smart Stock Predictor")
-st.caption("XGBoost • Trained on 20 top NSE stocks • 5-day direction forecast • Educational only")
+st.title("📈 NSE Smart Predictor")
+st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Educational only")
 
-# Sidebar controls
-with st.sidebar:
-    st.header("Controls")
-    stocks_dict = {
-        "Reliance Industries": "RELIANCE.NS",
-        "TCS": "TCS.NS",
-        "HDFC Bank": "HDFCBANK.NS",
-        "ICICI Bank": "ICICIBANK.NS",
-        "Bharti Airtel": "BHARTIARTL.NS",
-        "SBI": "SBIN.NS",
-        "Infosys": "INFY.NS",
-        "ITC": "ITC.NS",
-        "HUL": "HINDUNILVR.NS",
-        "L&T": "LT.NS",
-        "Bajaj Finance": "BAJFINANCE.NS",
-        "Nifty 50 Index": "^NSEI"
-    }
-    selected = st.selectbox("Choose Stock", list(stocks_dict.keys()), index=2)
-    ticker = stocks_dict[selected]
+stocks_dict = {
+    "Reliance Industries": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "SBI": "SBIN.NS",
+    "Infosys": "INFY.NS",
+    "ITC": "ITC.NS",
+    "HUL": "HINDUNILVR.NS",
+    "L&T": "LT.NS",
+    "Bajaj Finance": "BAJFINANCE.NS",
+    "Nifty 50 Index": "^NSEI"
+}
 
-    st.markdown("---")
-    if st.button("Analyze & Predict", type="primary", use_container_width=True):
-        pass  # just to trigger rerun
+col1, col2 = st.columns([3, 1])
+with col1:
+    selected = st.selectbox("Select Stock", list(stocks_dict.keys()), index=2)
+with col2:
+    if st.button("Analyze", type="primary", use_container_width=True):
+        pass
+
+ticker = stocks_dict[selected]
 
 # ────────────────────────────────────────────────
-if st.button("Analyze & Predict", type="primary", key="main_predict"):
-    with st.spinner(f"Loading {selected} data & running prediction..."):
+if st.button("Analyze & Predict", type="primary", key="predict_btn"):
+    with st.spinner(f"Loading {selected}..."):
         df = fetch_stock_data(ticker)
         if df.empty or len(df) < 200:
-            st.error("Not enough data — try another stock or wait.")
+            st.error("Not enough data — try another stock.")
         else:
-            # Latest price
-            latest_close = df['Close'].iloc[-1]
-            prev_close = df['Close'].iloc[-2]
-            change_pct = (latest_close - prev_close) / prev_close * 100
+            # Latest day info
+            last_row = df.iloc[-1]
+            prev_close = df['Close'].iloc[-2] if len(df) > 1 else last_row['Close']
+            change_pct = (last_row['Close'] - prev_close) / prev_close * 100
 
-            # Signal card
-            col_signal, col_price = st.columns([2, 1])
+            # Show today's key prices in one line
+            st.markdown(f"""
+                <div style="display: flex; justify-content: space-around; background: #1e1e1e; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+                    <div><strong>Open:</strong> ₹{last_row['Open']:.2f}</div>
+                    <div><strong>High:</strong> ₹{last_row['High']:.2f}</div>
+                    <div><strong>Low:</strong> ₹{last_row['Low']:.2f}</div>
+                    <div><strong>Close:</strong> ₹{last_row['Close']:.2f}</div>
+                    <div><strong>Change:</strong> {'+' if change_pct >= 0 else ''}{change_pct:.2f}%</div>
+                </div>
+            """, unsafe_allow_html=True)
 
-            with col_signal:
-                # Feature engineering (same as training)
-                df['SMA_Ratio'] = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
-                df['EMA_9_21_Gap'] = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
-                delta = df['Close'].diff()
-                gain = delta.where(delta > 0, 0).rolling(14).mean()
-                loss = -delta.where(delta < 0, 0).rolling(14).mean()
-                rs = gain / loss
-                df['RSI'] = 100 - (100 / (1 + rs))
+            # Feature engineering
+            df['SMA_Ratio'] = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
+            df['EMA_9_21_Gap'] = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
+            delta = df['Close'].diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = -delta.where(delta < 0, 0).rolling(14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
 
-                latest = df[['SMA_Ratio', 'EMA_9_21_Gap', 'RSI']].iloc[-1:].dropna()
+            latest = df[['SMA_Ratio', 'EMA_9_21_Gap', 'RSI']].iloc[-1:].dropna()
 
-                if latest.empty:
-                    st.warning("Not enough history for features.")
+            if latest.empty:
+                st.warning("Not enough history for features.")
+            else:
+                prob_up = model.predict_proba(latest)[0][1]
+
+                # Signal logic
+                if prob_up >= 0.70:
+                    signal_class = "strong-buy"
+                    signal_text = "STRONG BUY"
+                elif prob_up >= 0.60:
+                    signal_class = "buy"
+                    signal_text = "BUY"
+                elif prob_up >= 0.40:
+                    signal_class = "hold"
+                    signal_text = "HOLD"
+                elif prob_up >= 0.30:
+                    signal_class = "sell"
+                    signal_text = "SELL"
                 else:
-                    prob_up = model.predict_proba(latest)[0][1]
-                    
-                    if prob_up >= 0.70:
-                        signal_class = "signal-strong-buy"
-                        signal_text = "STRONG BUY"
-                        icon = "🚀"
-                    elif prob_up >= 0.60:
-                        signal_class = "signal-buy"
-                        signal_text = "BUY"
-                        icon = "📈"
-                    elif prob_up >= 0.40:
-                        signal_class = "signal-hold"
-                        signal_text = "HOLD"
-                        icon = "⚖️"
-                    elif prob_up >= 0.30:
-                        signal_class = "signal-sell"
-                        signal_text = "SELL"
-                        icon = "📉"
-                    else:
-                        signal_class = "signal-strong-sell"
-                        signal_text = "STRONG SELL"
-                        icon = "⚠️"
+                    signal_class = "strong-sell"
+                    signal_text = "STRONG SELL"
 
-                    confidence = f"{max(prob_up, 1-prob_up)*100:.1f}%"
+                confidence = f"{max(prob_up, 1-prob_up)*100:.1f}%"
 
-                    st.markdown(f"""
-                        <div class="metric-card">
-                            <h3>5-Day Outlook</h3>
-                            <p class="{signal_class}">{icon} {signal_text}</p>
-                            <p style="font-size:1.3rem; color:#555;">Confidence: {confidence}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
+                # Big signal display
+                st.markdown(f"""
+                    <div class="big-signal {signal_class}">
+                        {signal_text}
+                    </div>
+                    <div class="confidence" style="text-align:center;">
+                        Confidence: {confidence}
+                    </div>
+                """, unsafe_allow_html=True)
 
-            with col_price:
-                st.metric(
-                    label=f"Latest {selected}",
-                    value=f"₹{latest_close:,.2f}",
-                    delta=f"{change_pct:.2f}%",
-                    delta_color="normal"
-                )
-
-            # Chart – Candlestick + Prediction (if you want to predict price, we can extend)
-            st.subheader("Price Chart (Recent 150 days)")
+            # Chart – Candlestick
             fig = go.Figure(data=[
                 go.Candlestick(
                     x=df.index[-150:],
@@ -168,28 +162,28 @@ if st.button("Analyze & Predict", type="primary", key="main_predict"):
                     low=df['Low'][-150:],
                     close=df['Close'][-150:],
                     name='Price',
-                    increasing_line_color='green', decreasing_line_color='red'
+                    increasing_line_color='#26a69a',
+                    decreasing_line_color='#ef5350'
                 )
             ])
             fig.update_layout(
-                title=f"{selected} Recent Price Action",
+                title=f"{selected} – Recent 150 Days",
                 xaxis_title="Date",
                 yaxis_title="Price (₹)",
-                height=500,
+                height=550,
                 xaxis_rangeslider_visible=True,
-                template="plotly_white",
-                hovermode="x unified"
+                hovermode="x unified",
+                template="plotly_dark"
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Extra info
-            with st.expander("How this prediction works"):
+            with st.expander("About this prediction"):
                 st.markdown("""
-                - Model trained on 20 major NSE stocks using relative features (SMA ratio, EMA gap, RSI).
-                - Predicts direction (UP/DOWN) for next 5 trading days.
-                - Confidence reflects how certain the model is.
-                - **Not financial advice** — for education only.
+                - XGBoost model trained on 20 major NSE stocks  
+                - Features: SMA ratio, EMA gap, RSI  
+                - Predicts if price will be higher in 5 trading days  
+                - **Not financial advice** – education & illustration only
                 """)
 
 else:
-    st.info("Choose a stock and click 'Analyze & Predict' to see the forecast.")
+    st.info("Select a stock and click Analyze & Predict to see the forecast.")
