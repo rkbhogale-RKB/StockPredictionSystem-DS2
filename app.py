@@ -44,15 +44,19 @@ st.markdown("""
     .sell        { color: #ffca28; }
     .strong-sell { color: #ff5252; }
     .confidence  { font-size: 1.8rem; color: #aaa; text-align: center; }
-    .price-bar   { background: #1e1e1e; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.3rem; }
+    .price-bar   { background: #1e1e1e; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.3rem; text-align: center; }
+    .select-row  { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .select-row select { flex: 1; }
+    .select-row button { flex: 0 0 auto; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📈 NSE Smart Predictor")
 st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Educational only")
 
-# Stock selector + Analyze button in one row
-col_select, col_btn = st.columns([3, 1])
+# Select + Button in one clean row
+st.markdown('<div class="select-row">', unsafe_allow_html=True)
+col_select, col_btn = st.columns([5, 2])
 with col_select:
     stocks_dict = {
         "Reliance Industries": "RELIANCE.NS",
@@ -72,7 +76,8 @@ with col_select:
 ticker = stocks_dict[selected]
 
 with col_btn:
-    analyze_clicked = st.button("Analyze", type="primary", use_container_width=True)
+    analyze_clicked = st.button("Analyze & Predict", type="primary", use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────
 if analyze_clicked:
@@ -88,11 +93,8 @@ if analyze_clicked:
 
             st.markdown(f"""
                 <div class="price-bar">
-                    <strong>Open:</strong> ₹{last['Open']:.2f} &nbsp;&nbsp;
-                    <strong>High:</strong> ₹{last['High']:.2f} &nbsp;&nbsp;
-                    <strong>Low:</strong> ₹{last['Low']:.2f} &nbsp;&nbsp;
-                    <strong>Close:</strong> ₹{last['Close']:.2f} &nbsp;&nbsp;
-                    <strong>Change:</strong> {'+' if change_pct >= 0 else ''}{change_pct:.2f}%
+                    Open: ₹{last['Open']:.2f}  |  High: ₹{last['High']:.2f}  |  Low: ₹{last['Low']:.2f}  
+                    |  Close: ₹{last['Close']:.2f}  |  Change: {'+' if change_pct >= 0 else ''}{change_pct:.2f}%
                 </div>
             """, unsafe_allow_html=True)
 
@@ -112,7 +114,6 @@ if analyze_clicked:
             else:
                 prob_up = model.predict_proba(latest)[0][1]
 
-                # Signal
                 if prob_up >= 0.70:
                     sig_class = "strong-buy"
                     sig_text = "STRONG BUY"
@@ -134,7 +135,7 @@ if analyze_clicked:
                 st.markdown(f'<div class="big-signal {sig_class}">{sig_text}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="confidence">Confidence: {confidence}</div>', unsafe_allow_html=True)
 
-            # Chart with future area
+            # Chart – fixed scaling + subtle future zone
             fig = go.Figure()
 
             # Candlestick
@@ -149,56 +150,55 @@ if analyze_clicked:
                 decreasing_line_color='#ef5350'
             ))
 
-            # Future area (shaded confidence zone)
-            if prob_up > 0.5:
-                color = 'rgba(0, 255, 157, 0.25)'  # green transparent
-                y_high = last['Close'] * 1.10
-                y_low = last['Close'] * 0.95
-            elif prob_up < 0.5:
-                color = 'rgba(255, 82, 82, 0.25)'  # red transparent
-                y_high = last['Close'] * 1.05
-                y_low = last['Close'] * 0.90
-            else:
-                color = 'rgba(176, 190, 197, 0.2)'  # gray
-                y_high = last['Close'] * 1.05
-                y_low = last['Close'] * 0.95
-
+            # Future shaded zone (much tighter range so it doesn't squash y-axis)
+            last_close = last['Close']
             future_dates = pd.bdate_range(start=df.index[-1] + pd.Timedelta(days=1), periods=5)
+
+            # Zone height = 5–10% of current price, opacity based on confidence
+            range_pct = 0.08 if prob_up > 0.7 or prob_up < 0.3 else 0.05
+            opacity = 0.4 if abs(prob_up - 0.5) > 0.15 else 0.2
+
+            if prob_up > 0.5:
+                color = f'rgba(0, 255, 157, {opacity})'  # green
+                y_center = last_close * 1.02
+            elif prob_up < 0.5:
+                color = f'rgba(255, 82, 82, {opacity})'  # red
+                y_center = last_close * 0.98
+            else:
+                color = f'rgba(176, 190, 197, {opacity})'  # gray
+                y_center = last_close
+
+            y_high = y_center * (1 + range_pct)
+            y_low = y_center * (1 - range_pct)
+
             fig.add_trace(go.Scatter(
-                x=[df.index[-1]] + list(future_dates) + [df.index[-1]],
-                y=[last['Close']] + [y_high] * len(future_dates) + [y_high],
-                fill='tonexty',
+                x=list(future_dates) + list(future_dates[::-1]),
+                y=[y_high] * len(future_dates) + [y_low] * len(future_dates),
+                fill='toself',
                 fillcolor=color,
                 line=dict(color='rgba(0,0,0,0)'),
                 name='Prediction Zone',
                 showlegend=True
             ))
-            fig.add_trace(go.Scatter(
-                x=[df.index[-1]] + list(future_dates) + [df.index[-1]],
-                y=[last['Close']] + [y_low] * len(future_dates) + [y_low],
-                fill='tonexty',
-                fillcolor=color,
-                line=dict(color='rgba(0,0,0,0)'),
-                showlegend=False
-            ))
 
             fig.update_layout(
-                title=f"{selected} – Recent + 5-Day Outlook Zone",
+                title=f"{selected} – Recent 150 Days + Outlook Zone",
                 xaxis_title="Date",
                 yaxis_title="Price (₹)",
                 height=600,
                 xaxis_rangeslider_visible=True,
                 hovermode="x unified",
-                template="plotly_dark"
+                template="plotly_dark",
+                yaxis=dict(autorange=True, gridcolor='#444')  # force proper auto-range
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            with st.expander("About"):
+            with st.expander("About this forecast"):
                 st.markdown("""
-                - Model trained on 20 NSE stocks  
-                - Uses SMA ratio, EMA gap, RSI  
-                - Predicts if price higher in 5 days  
-                - Shaded area shows confidence-based zone  
+                - Model trained on 20 major NSE stocks  
+                - Uses relative features (SMA ratio, EMA gap, RSI)  
+                - Predicts if price likely higher in 5 trading days  
+                - Shaded zone shows confidence-based direction & strength  
                 - **Educational only** — not trading advice
                 """)
 
