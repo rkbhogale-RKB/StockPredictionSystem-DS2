@@ -3,5 +3,6 @@ yfinance
 pandas
 numpy
 plotly
+xgboost
+joblib
 scikit-learn
-tensorflow==2.19.0   # match your Colab version (from earlier print)
