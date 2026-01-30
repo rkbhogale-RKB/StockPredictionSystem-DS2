@@ -203,3 +203,6 @@ if should_analyze:
 
 else:
     st.info("Select a stock above to see the forecast automatically.")
+
+st.markdown("---")
+st.caption("Built by Rohit K.Bhogale • Educational project using XGboost • NSE data via yfinance • Model trained on top 20 Indian large-caps")
