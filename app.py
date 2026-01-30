@@ -45,42 +45,44 @@ st.markdown("""
     .strong-sell { color: #ff5252; }
     .confidence  { font-size: 1.8rem; color: #aaa; text-align: center; }
     .price-bar   { background: #1e1e1e; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.3rem; text-align: center; }
-    .select-row  { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-    .select-row select { flex: 1; }
-    .select-row button { flex: 0 0 auto; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📈 NSE Smart Predictor")
 st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Educational only")
 
-# Select + Button in one clean row
-st.markdown('<div class="select-row">', unsafe_allow_html=True)
-col_select, col_btn = st.columns([5, 2])
-with col_select:
-    stocks_dict = {
-        "Reliance Industries": "RELIANCE.NS",
-        "TCS": "TCS.NS",
-        "HDFC Bank": "HDFCBANK.NS",
-        "ICICI Bank": "ICICIBANK.NS",
-        "Bharti Airtel": "BHARTIARTL.NS",
-        "SBI": "SBIN.NS",
-        "Infosys": "INFY.NS",
-        "ITC": "ITC.NS",
-        "HUL": "HINDUNILVR.NS",
-        "L&T": "LT.NS",
-        "Bajaj Finance": "BAJFINANCE.NS",
-        "Nifty 50 Index": "^NSEI"
-    }
-    selected = st.selectbox("Select Stock", list(stocks_dict.keys()), index=2)
+# Stock selector (auto-triggers on change)
+stocks_dict = {
+    "Reliance Industries": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "SBI": "SBIN.NS",
+    "Infosys": "INFY.NS",
+    "ITC": "ITC.NS",
+    "HUL": "HINDUNILVR.NS",
+    "L&T": "LT.NS",
+    "Bajaj Finance": "BAJFINANCE.NS",
+    "Nifty 50 Index": "^NSEI"
+}
+
+# Use session_state to detect change
+if 'previous_ticker' not in st.session_state:
+    st.session_state.previous_ticker = None
+
+selected = st.selectbox("Select Stock", list(stocks_dict.keys()), index=2, key="stock_select")
 ticker = stocks_dict[selected]
 
-with col_btn:
-    analyze_clicked = st.button("Analyze & Predict", type="primary", use_container_width=True)
-st.markdown('</div>', unsafe_allow_html=True)
+# Auto-run when stock changes
+if st.session_state.previous_ticker != ticker:
+    st.session_state.previous_ticker = ticker
+    should_analyze = True
+else:
+    should_analyze = False
 
 # ────────────────────────────────────────────────
-if analyze_clicked:
+if should_analyze:
     with st.spinner(f"Loading {selected}..."):
         df = fetch_stock_data(ticker)
         if df.empty or len(df) < 200:
@@ -138,7 +140,6 @@ if analyze_clicked:
             # Chart – fixed scaling + subtle future zone
             fig = go.Figure()
 
-            # Candlestick
             fig.add_trace(go.Candlestick(
                 x=df.index[-150:],
                 open=df['Open'][-150:],
@@ -150,22 +151,20 @@ if analyze_clicked:
                 decreasing_line_color='#ef5350'
             ))
 
-            # Future shaded zone (much tighter range so it doesn't squash y-axis)
             last_close = last['Close']
             future_dates = pd.bdate_range(start=df.index[-1] + pd.Timedelta(days=1), periods=5)
 
-            # Zone height = 5–10% of current price, opacity based on confidence
             range_pct = 0.08 if prob_up > 0.7 or prob_up < 0.3 else 0.05
             opacity = 0.4 if abs(prob_up - 0.5) > 0.15 else 0.2
 
             if prob_up > 0.5:
-                color = f'rgba(0, 255, 157, {opacity})'  # green
+                color = f'rgba(0, 255, 157, {opacity})'
                 y_center = last_close * 1.02
             elif prob_up < 0.5:
-                color = f'rgba(255, 82, 82, {opacity})'  # red
+                color = f'rgba(255, 82, 82, {opacity})'
                 y_center = last_close * 0.98
             else:
-                color = f'rgba(176, 190, 197, {opacity})'  # gray
+                color = f'rgba(176, 190, 197, {opacity})'
                 y_center = last_close
 
             y_high = y_center * (1 + range_pct)
@@ -189,7 +188,7 @@ if analyze_clicked:
                 xaxis_rangeslider_visible=True,
                 hovermode="x unified",
                 template="plotly_dark",
-                yaxis=dict(autorange=True, gridcolor='#444')  # force proper auto-range
+                yaxis=dict(autorange=True, gridcolor='#444')
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -203,4 +202,4 @@ if analyze_clicked:
                 """)
 
 else:
-    st.info("Choose a stock and click Analyze & Predict.")
+    st.info("Select a stock above to see the forecast automatically.")
