@@ -3,94 +3,106 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+import plotly.io as pio
+import joblib
 import datetime as dt
+import time
 
-# Cache to avoid re-training every time
-@st.cache_resource(show_spinner=False)
-def get_data_and_model(ticker):
-    end = dt.date.today()
-    start = end - dt.timedelta(days=2000)
-    df = yf.download(ticker, start=start, end=end, progress=False)
-    if df.empty or len(df) < 100:
-        return None, None, None
-    
-    close_prices = df['Close'].values.reshape(-1, 1)
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(close_prices)
-    
-    look_back = 60
-    X, y = [], []
-    for i in range(look_back, len(scaled_data)):
-        X.append(scaled_data[i-look_back:i, 0])
-        y.append(scaled_data[i, 0])
-    
-    X = np.array(X).reshape((len(X), look_back, 1))
-    y = np.array(y)
-    
-    split = int(0.8 * len(X))
-    X_train, y_train = X[:split], y[:split]
-    
-    model = Sequential()
-    model.add(LSTM(50, return_sequences=True, input_shape=(look_back, 1)))
-    model.add(Dropout(0.2))
-    model.add(LSTM(50))
-    model.add(Dropout(0.2))
-    model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
-    
-    return df, scaler, model
+pio.templates.default = "plotly_white"  # Fix blank/black graphs
 
-st.set_page_config(page_title="NSE Stock Predictor", layout="wide")
-st.title("Indian Stock Market Price Prediction (NSE) - LSTM Demo")
-st.caption("Educational only • Not financial advice")
+# Cache data fetch
+@st.cache_data(ttl=1800)
+def fetch_stock_data(ticker, period="5y"):
+    try:
+        df = yf.download(ticker, period=period, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty:
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        st.error(f"Data fetch error: {e}")
+        return pd.DataFrame()
 
+# Load XGBoost model (upload 'xgboost_stock_model.pkl' to repo)
+@st.cache_resource
+def load_model():
+    try:
+        return joblib.load('xgboost_stock_model.pkl')
+    except Exception as e:
+        st.error(f"Model load failed: {e}. Upload xgboost_stock_model.pkl")
+        return None
+
+model = load_model()
+if model is None:
+    st.stop()
+
+# Expanded stock list
 stocks_dict = {
     "Reliance Industries": "RELIANCE.NS",
     "TCS": "TCS.NS",
     "HDFC Bank": "HDFCBANK.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "SBI": "SBIN.NS",
     "Infosys": "INFY.NS",
+    "ITC": "ITC.NS",
+    "HUL": "HINDUNILVR.NS",
+    "L&T": "LT.NS",
+    "Bajaj Finance": "BAJFINANCE.NS",
+    "HCL Tech": "HCLTECH.NS",
+    "Maruti Suzuki": "MARUTI.NS",
+    "Sun Pharma": "SUNPHARMA.NS",
+    "Adani Enterprises": "ADANIENT.NS",
+    "Tata Motors": "TATAMOTORS.NS",
+    "ONGC": "ONGC.NS",
+    "Coal India": "COALINDIA.NS",
+    "NTPC": "NTPC.NS",
     "Nifty 50 Index": "^NSEI"
 }
+
+st.set_page_config(page_title="NSE Stock Predictor - XGBoost", layout="wide")
+st.title("📈 NSE Stock Direction Predictor (XGBoost)")
+st.caption("Universal model trained on 20 top NSE stocks • Predicts Up/Down in 5 days • Educational only")
 
 selected = st.selectbox("Select Stock", list(stocks_dict.keys()))
 ticker = stocks_dict[selected]
 
-future_days = st.slider("Predict next days?", 1, 30, 10)
-
-if st.button("Generate Prediction"):
-    with st.spinner("Loading data + training model..."):
-        df, scaler, model = get_data_and_model(ticker)
-        if df is None:
-            st.error("Data issue — try another stock.")
+if st.button("Analyze & Predict"):
+    with st.spinner("Fetching data & predicting..."):
+        df = fetch_stock_data(ticker)
+        if df.empty or len(df) < 200:
+            st.error("Not enough data. Try another stock.")
         else:
-            # Historical chart
-            fig_hist = go.Figure(go.Scatter(x=df.index[-400:], y=df['Close'][-400:], mode='lines', name='Historical'))
-            fig_hist.update_layout(title=f"{selected} Historical", height=400)
-            st.plotly_chart(fig_hist, use_container_width=True)
-            
-            # Predict future
-            last_seq = scaler.transform(df['Close'][-60:].values.reshape(-1, 1))
-            batch = last_seq.reshape(1, 60, 1)
-            preds_scaled = []
-            for _ in range(future_days):
-                p = model.predict(batch, verbose=0)
-                preds_scaled.append(p[0, 0])
-                batch = np.roll(batch, -1, axis=1)
-                batch[0, -1, 0] = p[0, 0]
-            
-            preds = scaler.inverse_transform(np.array(preds_scaled).reshape(-1, 1))
-            
-            future_dates = pd.date_range(df.index[-1] + pd.Timedelta(1, 'D'), periods=future_days)
-            pred_df = pd.DataFrame({'Date': future_dates.strftime('%Y-%m-%d'), 'Predicted ₹': preds.flatten().round(2)})
-            st.subheader(f"Next {future_days} Days Predictions")
-            st.dataframe(pred_df)
-            
-            fig_pred = go.Figure()
-            fig_pred.add_trace(go.Scatter(x=df.index[-200:], y=df['Close'][-200:], mode='lines', name='Historical'))
-            fig_pred.add_trace(go.Scatter(x=future_dates, y=preds.flatten(), mode='lines', name='Predicted', line=dict(dash='dash')))
-            fig_pred.update_layout(title="Forecast", height=400)
-            st.plotly_chart(fig_pred, use_container_width=True)
+            # Current price info
+            latest_close = df['Close'].iloc[-1]
+            change = df['Close'].pct_change().iloc[-1] * 100
+            st.metric("Latest Close", f"₹{latest_close:,.2f}", f"{change:.2f}%")
+
+            # Feature engineering (same as training)
+            df['SMA_Ratio'] = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
+            df['EMA_9_21_Gap'] = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
+            delta = df['Close'].diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = -delta.where(delta < 0, 0).rolling(14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
+
+            latest_features = df[['SMA_Ratio', 'EMA_9_21_Gap', 'RSI']].iloc[-1:].dropna()
+
+            if latest_features.empty:
+                st.warning("Not enough data for features (need 200+ days).")
+            else:
+                prob_up = model.predict_proba(latest_features)[0][1]  # prob of class 1 (Up)
+                signal = "UP" if prob_up > 0.6 else "DOWN" if prob_up < 0.4 else "NEUTRAL"
+                confidence = f"{prob_up*100:.1f}%" if prob_up >= 0.5 else f"{(1-prob_up)*100:.1f}%"
+
+                st.subheader(f"5-Day Direction Prediction: **{signal}** ({confidence} confidence)")
+
+                # Simple chart
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index[-150:], y=df['Close'][-150:], name='Close', line=dict(color='blue')))
+                fig.update_layout(title=f"{selected} Recent Price", height=400, template="plotly_white")
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.info("Model trained on multiple stocks using SMA ratio, EMA gap, RSI → predicts if price higher in 5 days.")
