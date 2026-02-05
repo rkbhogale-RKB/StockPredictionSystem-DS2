@@ -137,21 +137,37 @@ with st.spinner(f"Analyzing {selected}..."):
             st.plotly_chart(fig, use_container_width=True)
 
             # ─── NEW ADDITION: NEWS TICKER ───
-            st.subheader(f"📰 Recent News: {selected}")
-            ticker_obj = yf.Ticker(ticker)
-            news_list = ticker_obj.news[:5] # Fetch latest 5 news items
+            # ─── FIXED NEWS TICKER ───
+st.subheader(f"📰 Recent News: {selected}")
+ticker_obj = yf.Ticker(ticker)
+
+try:
+    news_list = ticker_obj.news
+    # Yahoo news can be tricky; let's ensure it's a list and not empty
+    if news_list and len(news_list) > 0:
+        for article in news_list[:5]: # Show top 5
+            col1, col2 = st.columns([1, 4])
             
-            if news_list:
-                for article in news_list:
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        if "thumbnail" in article and article["thumbnail"].get("resolutions"):
-                            st.image(article["thumbnail"]["resolutions"][0]["url"], width=150)
-                    with col2:
-                        st.markdown(f"**[{article['title']}]({article['link']})**")
-                        st.caption(f"Source: {article.get('publisher', 'Unknown')} | Type: {article.get('type', 'News')}")
-            else:
-                st.write("No recent news found for this ticker.")
+            # Safely get title and link using .get() to avoid KeyError
+            title = article.get('title', 'No Title Available')
+            link = article.get('link', '#')
+            publisher = article.get('publisher', 'Unknown Source')
+            
+            with col1:
+                # Some articles don't have thumbnails; check carefully
+                thumb = article.get('thumbnail', {})
+                if thumb and 'resolutions' in thumb:
+                    st.image(thumb['resolutions'][0]['url'], width=150)
+                else:
+                    st.write("📷 No Image")
+                    
+            with col2:
+                st.markdown(f"**[{title}]({link})**")
+                st.caption(f"Source: {publisher}")
+    else:
+        st.info("No recent news found for this stock.")
+except Exception as e:
+    st.warning("Could not load news at this moment.")
 
 st.markdown("---")
 st.caption("Built by Rohit K.Bhogale • Educational project • Data via yfinance")
