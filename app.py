@@ -9,7 +9,7 @@ import datetime as dt
 
 pio.templates.default = "plotly_dark"
 
-# Cache data
+# 1. Cache data
 @st.cache_data(ttl=1800)
 def fetch_stock_data(ticker, period="5y"):
     try:
@@ -20,7 +20,7 @@ def fetch_stock_data(ticker, period="5y"):
     except:
         return pd.DataFrame()
 
-# Load model
+# 2. Load model
 @st.cache_resource
 def load_model():
     try:
@@ -30,6 +30,7 @@ def load_model():
 
 model = load_model()
 if model is None:
+    st.error("Model file 'xgboost_stock_model.pkl' not found!")
     st.stop()
 
 # ────────────────────────────────────────────────
@@ -51,7 +52,7 @@ st.markdown("""
 st.title("📈 NSE Smart Predictor")
 st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Educational only")
 
-# Stock selector (auto-triggers on change)
+# Stock selector
 stocks_dict = {
     "Reliance Industries": "RELIANCE.NS",
     "TCS": "TCS.NS",
@@ -67,142 +68,90 @@ stocks_dict = {
     "Nifty 50 Index": "^NSEI"
 }
 
-# Use session_state to detect change
-if 'previous_ticker' not in st.session_state:
-    st.session_state.previous_ticker = None
-
-selected = st.selectbox("Select Stock", list(stocks_dict.keys()), index=2, key="stock_select")
+selected = st.selectbox("Select Stock", list(stocks_dict.keys()), index=2)
 ticker = stocks_dict[selected]
 
-# Auto-run when stock changes
-if st.session_state.previous_ticker != ticker:
-    st.session_state.previous_ticker = ticker
-    should_analyze = True
-else:
-    should_analyze = False
-
 # ────────────────────────────────────────────────
-if should_analyze:
-    with st.spinner(f"Loading {selected}..."):
-        df = fetch_stock_data(ticker)
-        if df.empty or len(df) < 200:
-            st.error("Not enough data.")
-        else:
-            # Today's prices
-            last = df.iloc[-1]
-            prev_close = df['Close'].iloc[-2] if len(df) > 1 else last['Close']
-            change_pct = (last['Close'] - prev_close) / prev_close * 100
+with st.spinner(f"Analyzing {selected}..."):
+    df = fetch_stock_data(ticker)
+    
+    if df.empty or len(df) < 200:
+        st.error("Not enough data to generate features.")
+    else:
+        # Latest Price Info
+        last = df.iloc[-1]
+        prev_close = df['Close'].iloc[-2]
+        change_pct = (last['Close'] - prev_close) / prev_close * 100
 
-            st.markdown(f"""
-                <div class="price-bar">
-                    Open: ₹{last['Open']:.2f}  |  High: ₹{last['High']:.2f}  |  Low: ₹{last['Low']:.2f}  
-                    |  Close: ₹{last['Close']:.2f}  |  Change: {'+' if change_pct >= 0 else ''}{change_pct:.2f}%
-                </div>
-            """, unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="price-bar">
+                Open: ₹{last['Open']:.2f}  |  High: ₹{last['High']:.2f}  |  Low: ₹{last['Low']:.2f}  
+                |  Close: ₹{last['Close']:.2f}  |  Change: {'+' if change_pct >= 0 else ''}{change_pct:.2f}%
+            </div>
+        """, unsafe_allow_html=True)
 
-            # Features
-            df['SMA_Ratio'] = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
-            df['EMA_9_21_Gap'] = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
-            delta = df['Close'].diff()
-            gain = delta.where(delta > 0, 0).rolling(14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            rs = gain / loss
-            df['RSI'] = 100 - (100 / (1 + rs))
+        # Feature Engineering
+        df['SMA_Ratio'] = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
+        df['EMA_9_21_Gap'] = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
+        delta = df['Close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(14).mean()
+        df['RSI'] = 100 - (100 / (1 + (gain / loss)))
 
-            latest = df[['SMA_Ratio', 'EMA_9_21_Gap', 'RSI']].iloc[-1:].dropna()
+        latest_features = df[['SMA_Ratio', 'EMA_9_21_Gap', 'RSI']].iloc[-1:].dropna()
 
-            if latest.empty:
-                st.warning("Not enough history.")
-            else:
-                prob_up = model.predict_proba(latest)[0][1]
+        if not latest_features.empty:
+            prob_up = model.predict_proba(latest_features)[0][1]
 
-                if prob_up >= 0.70:
-                    sig_class = "strong-buy"
-                    sig_text = "STRONG BUY"
-                elif prob_up >= 0.60:
-                    sig_class = "buy"
-                    sig_text = "BUY"
-                elif prob_up >= 0.40:
-                    sig_class = "hold"
-                    sig_text = "HOLD"
-                elif prob_up >= 0.30:
-                    sig_class = "sell"
-                    sig_text = "SELL"
-                else:
-                    sig_class = "strong-sell"
-                    sig_text = "STRONG SELL"
+            # Signal Logic
+            if prob_up >= 0.70: sig_class, sig_text = "strong-buy", "STRONG BUY"
+            elif prob_up >= 0.60: sig_class, sig_text = "buy", "BUY"
+            elif prob_up >= 0.40: sig_class, sig_text = "hold", "HOLD"
+            elif prob_up >= 0.30: sig_class, sig_text = "sell", "SELL"
+            else: sig_class, sig_text = "strong-sell", "STRONG SELL"
 
-                confidence = f"{max(prob_up, 1 - prob_up) * 100:.1f}%"
+            st.markdown(f'<div class="big-signal {sig_class}">{sig_text}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="confidence">Model Confidence: {max(prob_up, 1 - prob_up) * 100:.1f}%</div>', unsafe_allow_html=True)
 
-                st.markdown(f'<div class="big-signal {sig_class}">{sig_text}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="confidence">Confidence: {confidence}</div>', unsafe_allow_html=True)
+            # ─── NEW ADDITION: 5-DAY TREND TABLE ───
+            st.subheader("🗓️ 5-Day Outlook Trend")
+            future_dates = pd.bdate_range(start=dt.date.today(), periods=6) # Today + Next 5 biz days
+            
+            trend_val = "UP 📈" if prob_up > 0.55 else ("DOWN 📉" if prob_up < 0.45 else "SIDEWAYS ↔️")
+            
+            trend_data = {
+                "Date": [d.strftime('%Y-%m-%d') for d in future_dates],
+                "Day": [d.strftime('%A') for d in future_dates],
+                "Forecasted Trend": [trend_val] * 6
+            }
+            trend_df = pd.DataFrame(trend_data)
+            st.table(trend_df)
 
-            # Chart – fixed scaling + subtle future zone
+            # ─── CHART ───
             fig = go.Figure()
-
             fig.add_trace(go.Candlestick(
-                x=df.index[-150:],
-                open=df['Open'][-150:],
-                high=df['High'][-150:],
-                low=df['Low'][-150:],
-                close=df['Close'][-150:],
-                name='Price',
-                increasing_line_color='#26a69a',
-                decreasing_line_color='#ef5350'
+                x=df.index[-100:], open=df['Open'][-100:], high=df['High'][-100:],
+                low=df['Low'][-100:], close=df['Close'][-100:], name='Price'
             ))
-
-            last_close = last['Close']
-            future_dates = pd.bdate_range(start=df.index[-1] + pd.Timedelta(days=1), periods=5)
-
-            range_pct = 0.08 if prob_up > 0.7 or prob_up < 0.3 else 0.05
-            opacity = 0.4 if abs(prob_up - 0.5) > 0.15 else 0.2
-
-            if prob_up > 0.5:
-                color = f'rgba(0, 255, 157, {opacity})'
-                y_center = last_close * 1.02
-            elif prob_up < 0.5:
-                color = f'rgba(255, 82, 82, {opacity})'
-                y_center = last_close * 0.98
-            else:
-                color = f'rgba(176, 190, 197, {opacity})'
-                y_center = last_close
-
-            y_high = y_center * (1 + range_pct)
-            y_low = y_center * (1 - range_pct)
-
-            fig.add_trace(go.Scatter(
-                x=list(future_dates) + list(future_dates[::-1]),
-                y=[y_high] * len(future_dates) + [y_low] * len(future_dates),
-                fill='toself',
-                fillcolor=color,
-                line=dict(color='rgba(0,0,0,0)'),
-                name='Prediction Zone',
-                showlegend=True
-            ))
-
-            fig.update_layout(
-                title=f"{selected} – Recent 150 Days + Outlook Zone",
-                xaxis_title="Date",
-                yaxis_title="Price (₹)",
-                height=600,
-                xaxis_rangeslider_visible=True,
-                hovermode="x unified",
-                template="plotly_dark",
-                yaxis=dict(autorange=True, gridcolor='#444')
-            )
+            fig.update_layout(title=f"{selected} Price Action", height=500, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-            with st.expander("About this forecast"):
-                st.markdown("""
-                - Model trained on 20 major NSE stocks  
-                - Uses relative features (SMA ratio, EMA gap, RSI)  
-                - Predicts if price likely higher in 5 trading days  
-                - Shaded zone shows confidence-based direction & strength  
-                - **Educational only** — not trading advice
-                """)
-
-else:
-    st.info("Select a stock above to see the forecast automatically.")
+            # ─── NEW ADDITION: NEWS TICKER ───
+            st.subheader(f"📰 Recent News: {selected}")
+            ticker_obj = yf.Ticker(ticker)
+            news_list = ticker_obj.news[:5] # Fetch latest 5 news items
+            
+            if news_list:
+                for article in news_list:
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        if "thumbnail" in article and article["thumbnail"].get("resolutions"):
+                            st.image(article["thumbnail"]["resolutions"][0]["url"], width=150)
+                    with col2:
+                        st.markdown(f"**[{article['title']}]({article['link']})**")
+                        st.caption(f"Source: {article.get('publisher', 'Unknown')} | Type: {article.get('type', 'News')}")
+            else:
+                st.write("No recent news found for this ticker.")
 
 st.markdown("---")
-st.caption("Built by Rohit K.Bhogale • Educational project using XGboost • NSE data via yfinance • Model trained on top 20 Indian large-caps")
+st.caption("Built by Rohit K.Bhogale • Educational project • Data via yfinance")
