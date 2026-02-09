@@ -44,14 +44,14 @@ st.markdown("""
     .hold { color: #b0bec5; }
     .sell { color: #ffca28; }
     .strong-sell { color: #ff5252; }
-    .confidence { font-size: 1.8rem; color: #aaa; text-align: center; }
+    .confidence { font-size: 1.8rem; color: #aaa; text-align: center; margin: 10px 0; }
     .price-bar { background: #1e1e1e; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.3rem; text-align: center; }
     .perf-summary { text-align: center; color: #aaa; margin: 10px 0; font-size: 1.1rem; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📈 NSE Smart Predictor")
-st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Educational only")
+st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Educational only • Not financial advice")
 
 # Stock selector
 stocks_dict = {
@@ -72,30 +72,30 @@ stocks_dict = {
 selected = st.selectbox("Select Stock", list(stocks_dict.keys()), index=2)
 ticker = stocks_dict[selected]
 
-# Chart period selector
+# Chart view selector
 view_option = st.radio(
-    "Chart View",
+    "Chart Period",
     options=["Last 3 Months", "Last 1 Year", "Full History (5y)"],
     horizontal=True,
     index=0
 )
 
-# Map to yfinance periods or manual slicing
+# Map view to data slice
 if view_option == "Last 3 Months":
     days_back = 90
 elif view_option == "Last 1 Year":
     days_back = 365
 else:
-    days_back = None  # Full 5y
+    days_back = None  # full data
 
 # ────────────────────────────────────────────────
 with st.spinner(f"Analyzing {selected}..."):
     df = fetch_stock_data(ticker)
    
     if df.empty or len(df) < 200:
-        st.error("Not enough data to generate features.")
+        st.error("Not enough historical data available.")
     else:
-        # Latest Price Info
+        # Latest price info
         last = df.iloc[-1]
         prev_close = df['Close'].iloc[-2] if len(df) > 1 else last['Close']
         change_pct = (last['Close'] - prev_close) / prev_close * 100 if prev_close else 0
@@ -107,20 +107,20 @@ with st.spinner(f"Analyzing {selected}..."):
             </div>
         """, unsafe_allow_html=True)
 
-        # Recent performance summary
-        if len(df) >= 65:  # enough for ~3 months
+        # Recent performance
+        if len(df) >= 65:
             chg_5d  = (df['Close'].iloc[-1] - df['Close'].iloc[-6])  / df['Close'].iloc[-6] * 100 if len(df) >= 6 else 0
             chg_20d = (df['Close'].iloc[-1] - df['Close'].iloc[-21]) / df['Close'].iloc[-21] * 100 if len(df) >= 21 else 0
             chg_3m  = (df['Close'].iloc[-1] - df['Close'].iloc[-65]) / df['Close'].iloc[-65] * 100 if len(df) >= 65 else 0
             st.markdown(f"""
                 <div class="perf-summary">
-                    5-day: {chg_5d:+.1f}%  |  20-day: {chg_20d:+.1f}%  |  3-month: {chg_3m:+.1f}%
+                    5-day: {chg_5d:+.1f}%  |  20-day: {chg_20d:+.1f}%  |  3-month: {chg_3m:+.1f}%
                 </div>
             """, unsafe_allow_html=True)
 
-        # Feature Engineering (still uses full data for accuracy)
-        df['SMA_Ratio'] = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
-        df['EMA_9_21_Gap'] = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
+        # Feature engineering
+        df['SMA_Ratio']     = df['Close'].rolling(20).mean() / df['Close'].rolling(200).mean()
+        df['EMA_9_21_Gap']  = (df['Close'].ewm(span=9).mean() - df['Close'].ewm(span=21).mean()) / df['Close']
         delta = df['Close'].diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = -delta.where(delta < 0, 0).rolling(14).mean()
@@ -131,22 +131,36 @@ with st.spinner(f"Analyzing {selected}..."):
         if not latest_features.empty:
             prob_up = model.predict_proba(latest_features)[0][1]
 
-            # Slightly stricter thresholds for better alignment with visible trends
-            if prob_up >= 0.75: sig_class, sig_text = "strong-buy", "STRONG BUY"
-            elif prob_up >= 0.65: sig_class, sig_text = "buy", "BUY"
-            elif prob_up >= 0.45 and prob_up <= 0.65: sig_class, sig_text = "hold", "HOLD"
-            elif prob_up >= 0.35: sig_class, sig_text = "sell", "SELL"
-            else: sig_class, sig_text = "strong-sell", "STRONG SELL"
+            # Fixed signal logic: ~59-60% → HOLD
+            if prob_up >= 0.75:
+                sig_class, sig_text = "strong-buy", "STRONG BUY"
+            elif prob_up >= 0.65:
+                sig_class, sig_text = "buy", "BUY"
+            elif prob_up >= 0.45:
+                sig_class, sig_text = "hold", "HOLD"
+            elif prob_up >= 0.30:
+                sig_class, sig_text = "sell", "SELL"
+            else:
+                sig_class, sig_text = "strong-sell", "STRONG SELL"
 
             st.markdown(f'<div class="big-signal {sig_class}">{sig_text}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="confidence">Model Confidence: {max(prob_up, 1 - prob_up) * 100:.1f}% (5-day direction)</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="confidence">5-day Up Probability: {prob_up*100:.1f}% (raw model output)</div>', unsafe_allow_html=True)
 
-            # 5-Day Outlook
+            # 5-Day Outlook – now consistent with main signal
             st.subheader("🗓️ 5-Day Outlook Trend")
             future_dates = pd.bdate_range(start=dt.date.today(), periods=6)
-           
-            trend_val = "LIKELY UP 📈" if prob_up > 0.60 else ("LIKELY DOWN 📉" if prob_up < 0.40 else "NEUTRAL ↔️")
-           
+            
+            if prob_up >= 0.75:
+                trend_val = "STRONG UP 📈📈"
+            elif prob_up >= 0.65:
+                trend_val = "LIKELY UP 📈"
+            elif prob_up >= 0.45:
+                trend_val = "NEUTRAL ↔️"
+            elif prob_up >= 0.30:
+                trend_val = "LIKELY DOWN 📉"
+            else:
+                trend_val = "STRONG DOWN 📉📉"
+            
             trend_data = {
                 "Date": [d.strftime('%Y-%m-%d') for d in future_dates],
                 "Day": [d.strftime('%A') for d in future_dates],
@@ -154,18 +168,13 @@ with st.spinner(f"Analyzing {selected}..."):
             }
             st.table(pd.DataFrame(trend_data))
 
-            # ─── CHART ───
-            st.subheader(f"{selected} Price & Trend Lines")
+            # Chart
+            st.subheader(f"{selected} Price & Trend Lines ({view_option})")
 
-            # Slice data based on view
-            if days_back:
-                chart_df = df.iloc[-days_back:]
-            else:
-                chart_df = df
+            chart_df = df.iloc[-days_back:] if days_back else df
 
             fig = go.Figure()
 
-            # Candlestick
             fig.add_trace(go.Candlestick(
                 x=chart_df.index,
                 open=chart_df['Open'], high=chart_df['High'],
@@ -175,15 +184,14 @@ with st.spinner(f"Analyzing {selected}..."):
                 decreasing_line_color='#ff4d4d'
             ))
 
-            # Moving Averages (on sliced data)
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df['Close'].rolling(20).mean(),
-                                     name='20-day SMA', line=dict(color='orange', width=2)))
+                                     name='20 SMA', line=dict(color='orange', width=2)))
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df['Close'].rolling(200).mean(),
-                                     name='200-day SMA', line=dict(color='purple', width=2)))
+                                     name='200 SMA', line=dict(color='purple', width=2)))
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df['Close'].ewm(span=9).mean(),
-                                     name='9-day EMA', line=dict(color='#4fc3f7', width=1.5)))
+                                     name='9 EMA', line=dict(color='#4fc3f7', width=1.5)))
             fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df['Close'].ewm(span=21).mean(),
-                                     name='21-day EMA', line=dict(color='#ffca28', width=1.5)))
+                                     name='21 EMA', line=dict(color='#ffca28', width=1.5)))
 
             fig.update_layout(
                 title=f"{selected} – {view_option}",
@@ -200,4 +208,4 @@ with st.spinner(f"Analyzing {selected}..."):
             st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
-st.caption("Note: Signal predicts short-term (5-day) direction using momentum features only — may differ from longer chart trend. Built by Rohit K.Bhogale • Educational project • Data via yfinance")
+st.caption("Built by Rohit K. Bhogale • Educational project only • Data from yfinance • Not investment advice")
