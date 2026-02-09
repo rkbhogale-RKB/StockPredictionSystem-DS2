@@ -57,15 +57,24 @@ st.caption("XGBoost • Multi-stock trained • 5-day direction forecast • Edu
 stocks_dict = {
     "Reliance Industries": "RELIANCE.NS",
     "TCS": "TCS.NS",
-    "HDFC Bank": "HDFCBANK.NS",
     "ICICI Bank": "ICICIBANK.NS",
     "Bharti Airtel": "BHARTIARTL.NS",
-    "SBI": "SBIN.NS",
+    "State Bank of India (SBI)": "SBIN.NS",
     "Infosys": "INFY.NS",
+    "Life Insurance Corporation (LIC)": "LICI.NS",
     "ITC": "ITC.NS",
-    "HUL": "HINDUNILVR.NS",
-    "L&T": "LT.NS",
+    "Hindustan Unilever (HUL)": "HINDUNILVR.NS",
+    "Larsen & Toubro (L&T)": "LT.NS",
     "Bajaj Finance": "BAJFINANCE.NS",
+    "HCL Technologies": "HCLTECH.NS",
+    "Maruti Suzuki": "MARUTI.NS",
+    "Sun Pharmaceutical": "SUNPHARMA.NS",
+    "Adani Enterprises": "ADANIENT.NS",
+    "Tata Motors": "TATAMOTORS.NS",
+    "ONGC": "ONGC.NS",
+    "Coal India": "COALINDIA.NS",
+    "NTPC": "NTPC.NS",
+    # Optional: keep the index if you want
     "Nifty 50 Index": "^NSEI"
 }
 
