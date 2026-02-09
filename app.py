@@ -39,13 +39,13 @@ st.set_page_config(page_title="NSE Smart Predictor", layout="wide", page_icon="�
 st.markdown("""
     <style>
     .big-signal { font-size: 3.8rem; font-weight: bold; text-align: center; margin: 20px 0; }
-    .strong-buy  { color: #00ff9d; }
-    .buy         { color: #40c4ff; }
-    .hold        { color: #b0bec5; }
-    .sell        { color: #ffca28; }
+    .strong-buy { color: #00ff9d; }
+    .buy { color: #40c4ff; }
+    .hold { color: #b0bec5; }
+    .sell { color: #ffca28; }
     .strong-sell { color: #ff5252; }
-    .confidence  { font-size: 1.8rem; color: #aaa; text-align: center; }
-    .price-bar   { background: #1e1e1e; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.3rem; text-align: center; }
+    .confidence { font-size: 1.8rem; color: #aaa; text-align: center; }
+    .price-bar { background: #1e1e1e; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.3rem; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -74,7 +74,7 @@ ticker = stocks_dict[selected]
 # ────────────────────────────────────────────────
 with st.spinner(f"Analyzing {selected}..."):
     df = fetch_stock_data(ticker)
-    
+   
     if df.empty or len(df) < 200:
         st.error("Not enough data to generate features.")
     else:
@@ -82,11 +82,10 @@ with st.spinner(f"Analyzing {selected}..."):
         last = df.iloc[-1]
         prev_close = df['Close'].iloc[-2]
         change_pct = (last['Close'] - prev_close) / prev_close * 100
-
         st.markdown(f"""
             <div class="price-bar">
-                Open: ₹{last['Open']:.2f}  |  High: ₹{last['High']:.2f}  |  Low: ₹{last['Low']:.2f}  
-                |  Close: ₹{last['Close']:.2f}  |  Change: {'+' if change_pct >= 0 else ''}{change_pct:.2f}%
+                Open: ₹{last['Open']:.2f} | High: ₹{last['High']:.2f} | Low: ₹{last['Low']:.2f}
+                | Close: ₹{last['Close']:.2f} | Change: {'+' if change_pct >= 0 else ''}{change_pct:.2f}%
             </div>
         """, unsafe_allow_html=True)
 
@@ -99,7 +98,7 @@ with st.spinner(f"Analyzing {selected}..."):
         df['RSI'] = 100 - (100 / (1 + (gain / loss)))
 
         latest_features = df[['SMA_Ratio', 'EMA_9_21_Gap', 'RSI']].iloc[-1:].dropna()
-
+        
         if not latest_features.empty:
             prob_up = model.predict_proba(latest_features)[0][1]
 
@@ -113,12 +112,12 @@ with st.spinner(f"Analyzing {selected}..."):
             st.markdown(f'<div class="big-signal {sig_class}">{sig_text}</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="confidence">Model Confidence: {max(prob_up, 1 - prob_up) * 100:.1f}%</div>', unsafe_allow_html=True)
 
-            # ─── NEW ADDITION: 5-DAY TREND TABLE ───
+            # 5-Day Outlook Trend
             st.subheader("🗓️ 5-Day Outlook Trend")
-            future_dates = pd.bdate_range(start=dt.date.today(), periods=6) # Today + Next 5 biz days
-            
+            future_dates = pd.bdate_range(start=dt.date.today(), periods=6)  # Today + Next 5 biz days
+           
             trend_val = "UP 📈" if prob_up > 0.55 else ("DOWN 📉" if prob_up < 0.45 else "SIDEWAYS ↔️")
-            
+           
             trend_data = {
                 "Date": [d.strftime('%Y-%m-%d') for d in future_dates],
                 "Day": [d.strftime('%A') for d in future_dates],
@@ -127,47 +126,70 @@ with st.spinner(f"Analyzing {selected}..."):
             trend_df = pd.DataFrame(trend_data)
             st.table(trend_df)
 
-            # ─── CHART ───
+            # ─── IMPROVED CHART ───
+            st.subheader(f"{selected} Price & Trend Lines (Last 200 Days)")
+
             fig = go.Figure()
+
+            # Candlestick
             fig.add_trace(go.Candlestick(
-                x=df.index[-100:], open=df['Open'][-100:], high=df['High'][-100:],
-                low=df['Low'][-100:], close=df['Close'][-100:], name='Price'
+                x=df.index[-200:],
+                open=df['Open'][-200:],
+                high=df['High'][-200:],
+                low=df['Low'][-200:],
+                close=df['Close'][-200:],
+                name='Price',
+                increasing_line_color='#00cc96',
+                decreasing_line_color='#ff4d4d'
             ))
-            fig.update_layout(title=f"{selected} Price Action", height=500, template="plotly_dark")
+
+            # Moving Averages
+            fig.add_trace(go.Scatter(
+                x=df.index[-200:],
+                y=df['Close'].rolling(20).mean()[-200:],
+                name='20-day SMA',
+                line=dict(color='orange', width=2)
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=df.index[-200:],
+                y=df['Close'].rolling(200).mean()[-200:],
+                name='200-day SMA',
+                line=dict(color='purple', width=2)
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=df.index[-200:],
+                y=df['Close'].ewm(span=9).mean()[-200:],
+                name='9-day EMA',
+                line=dict(color='#4fc3f7', width=1.5)
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=df.index[-200:],
+                y=df['Close'].ewm(span=21).mean()[-200:],
+                name='21-day EMA',
+                line=dict(color='#ffca28', width=1.5)
+            ))
+
+            fig.update_layout(
+                title=f"{selected} – Recent Price Action & Key Moving Averages",
+                height=600,
+                template="plotly_dark",
+                xaxis_rangeslider_visible=True,
+                xaxis_title="Date",
+                yaxis_title="Price (₹)",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                hovermode="x unified"
+            )
+
             st.plotly_chart(fig, use_container_width=True)
-
-            # ─── NEW ADDITION: NEWS TICKER ───
-            # ─── FIXED NEWS TICKER ───
-st.subheader(f"📰 Recent News: {selected}")
-ticker_obj = yf.Ticker(ticker)
-
-try:
-    news_list = ticker_obj.news
-    # Yahoo news can be tricky; let's ensure it's a list and not empty
-    if news_list and len(news_list) > 0:
-        for article in news_list[:5]: # Show top 5
-            col1, col2 = st.columns([1, 4])
-            
-            # Safely get title and link using .get() to avoid KeyError
-            title = article.get('title', 'No Title Available')
-            link = article.get('link', '#')
-            publisher = article.get('publisher', 'Unknown Source')
-            
-            with col1:
-                # Some articles don't have thumbnails; check carefully
-                thumb = article.get('thumbnail', {})
-                if thumb and 'resolutions' in thumb:
-                    st.image(thumb['resolutions'][0]['url'], width=150)
-                else:
-                    st.write("📷 No Image")
-                    
-            with col2:
-                st.markdown(f"**[{title}]({link})**")
-                st.caption(f"Source: {publisher}")
-    else:
-        st.info("No recent news found for this stock.")
-except Exception as e:
-    st.warning("Could not load news at this moment.")
 
 st.markdown("---")
 st.caption("Built by Rohit K.Bhogale • Educational project • Data via yfinance")
