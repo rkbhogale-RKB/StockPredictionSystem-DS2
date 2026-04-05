@@ -11,9 +11,7 @@ The project includes:
 
 ## 🚀 Live Demo
 
-The app is already deployed on **Streamlit Cloud**:
-
-👉 **[Open the Stock Prediction App]([https://your-streamlit-app-url.streamlit.app](https://stockpredictionsystem-xgboost-by-rohit.streamlit.app/))**  
+👉 **[Open the Stock Prediction App](https://stockpredictionsystem-xgboost-by-rohit.streamlit.app/)**
 
 ---
 
