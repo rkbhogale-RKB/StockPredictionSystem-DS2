@@ -13,8 +13,7 @@ The project includes:
 
 The app is already deployed on **Streamlit Cloud**:
 
-👉 **[Open the Stock Prediction App](https://your-streamlit-app-url.streamlit.app)**  
-*(Replace this line with your actual deployed Streamlit URL)*
+👉 **[Open the Stock Prediction App]([https://your-streamlit-app-url.streamlit.app](https://stockpredictionsystem-xgboost-by-rohit.streamlit.app/))**  
 
 ---
 
